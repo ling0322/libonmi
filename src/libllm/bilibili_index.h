@@ -1,6 +1,6 @@
 // The MIT License (MIT)
 //
-// Copyright (c) 2023 Xiaoyang Chen
+// Copyright (c) 2024 Xiaoyang Chen
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software
 // and associated documentation files (the "Software"), to deal in the Software without
@@ -26,31 +26,26 @@
 #include "lutil/ini_config.h"
 
 namespace libllm {
-namespace qwen {
+namespace index {
 
-/// @brief The Qwen model. Model structure of qwen is similiar to llama, the only difference is
-/// stopping criteria. So, we re-use the llama model and add specific logic for the stop tokens
-/// here.
-class QwenModelForGeneration : public llama::LlamaModelForGeneration {
+/// @brief The Bilibili index model. Model structure of index is the same as llama, the only
+/// difference is the prompt.
+class IndexModelForGeneration : public llama::LlamaModelForGeneration {
  public:
-  static std::shared_ptr<QwenModelForGeneration> fromPackage(
+  static std::shared_ptr<IndexModelForGeneration> fromPackage(
       const Context &ctx,
       lut::ZipFile *package);
 
   // noncopyable
-  QwenModelForGeneration(QwenModelForGeneration &) = delete;
-  QwenModelForGeneration &operator=(QwenModelForGeneration &) = delete;
+  IndexModelForGeneration(IndexModelForGeneration &) = delete;
+  IndexModelForGeneration &operator=(IndexModelForGeneration &) = delete;
 
   // override LlamaModelForGeneration
-  bool isStopToken(int tokenId) const override;
   Prompt buildPrompt(lut::Span<const Message> history) const override;
 
  private:
-  int _imStartId;
-  int _imEndId;
-
-  QwenModelForGeneration();
+  IndexModelForGeneration() = default;
 };
 
-}  // namespace qwen
+}  // namespace index
 }  // namespace libllm

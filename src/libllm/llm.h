@@ -44,7 +44,6 @@ extern "C" {
 #define LLM_ERROR_ABORTED 0x0102
 #define LLM_ERROR_EOF 0x0103
 
-typedef int32_t llmStatus_t;
 typedef struct llm_model_impl_t *llm_model_t;
 typedef struct llm_completion_impl_t *llm_completion_t;
 typedef struct llm_json_impl_t *llm_json_t;
@@ -52,9 +51,8 @@ typedef struct llm_asr_recognition_impl_t *llm_asr_recognition_t;
 typedef struct llm_asr_model_impl_t *llm_asr_model_t;
 
 // global state
-LLMAPI llmStatus_t llmInit(int32_t apiVersion);
-LLMAPI llmStatus_t llmDestroy();
-LLMAPI const char *llmGetLastErrorMessage();
+LLMAPI void llm_init();
+LLMAPI const char *llm_get_last_error_message();
 
 // JSON
 
