@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <unordered_map>
 
 #include "../../third_party/nlohmann/json.hpp"
@@ -46,32 +47,14 @@ constexpr char LlmConfigKey_WhisperLang[] = "whisper.language";
 constexpr char LlmConfigValue_Sampler[] = "sampler";
 constexpr char LlmConfigValue_Whisper[] = "whisper";
 
-struct llmModel_t {
-  Context ctx;
-  std::shared_ptr<ModelForGeneration> model_for_generation;
+struct llm_model_impl_t {
+  std::shared_ptr<ModelForGeneration> model;
   std::shared_ptr<Tokenizer> tokenizer;
-  std::string configFile;
-  int device;
 };
 
-struct llmCompletion_t {
-  int top_k;
-  float top_p;
-  float temperature;
-  std::shared_ptr<Prompt> prompt;
+struct llm_completion_impl_t {
   std::weak_ptr<ModelForGeneration> model_for_generation;
   std::shared_ptr<Generator> generator;
-  lut::Error error;
-  std::string chunkText;
-  std::unordered_map<std::string, std::string> kvConfig;
-};
-
-struct llmChunk_t {
-  std::string text;
-};
-
-struct llmPrompt_t {
-  std::shared_ptr<Prompt> prompt;
 };
 
 struct llm_json_impl_t {
@@ -142,6 +125,48 @@ Device getDeviceFromApi(int apiDevice) {
     default:
       throw lut::InvalidArgError("invalid device type");
   }
+}
+
+void checkJsonKeys(json &json, std::initializer_list<std::pair<std::string_view, bool>> schema) {
+  std::set<std::string_view> keys;
+  for (auto &[key, value] : json.items()) {
+    keys.emplace(key);
+  }
+
+  for (const auto &entry : schema) {
+    std::string_view key = entry.first;
+    bool required = entry.second;
+
+    auto it = keys.find(key);
+    if (required && it == keys.end()) {
+      throw lut::AbortedError(lut::sprintf("json: required key \"%s\" not found", key));
+    }
+
+    if (it != keys.end()) keys.erase(it);
+  }
+
+  if (!keys.empty()) {
+    throw lut::AbortedError(lut::sprintf("json: unexpected key \"%s\"", *keys.begin()));
+  }
+}
+
+template<typename T>
+T getValueFromJson(json &j, std::string_view key, T defaultVal) {
+  T val = defaultVal;
+  if (kwargsJson.contains(key)) {
+    val = kwargsJson[key];
+  }
+
+  return val;
+}
+
+GenerationConfig parseGenerationConfig(json &kwargsJson) {
+  GenerationConfig config;
+  config.temperature = getValueFromJson<float>(kwargsJson, "temperature", 1.0);
+  config.topK = getValueFromJson<int>(kwargsJson, "top_k", 50);
+  config.topP = getValueFromJson<float>(kwargsJson, "top_p", 0.8);
+
+  return config;
 }
 
 int parseGeneratorType(const std::string &name) {
@@ -229,116 +254,89 @@ const char *llmGetLastErrorMessage() {
   return gErrorMessage;
 }
 
-llmModel_t *llmModel_New() {
-  llmModel_t *model = new llmModel_t();
-  model->device = LLM_DEVICE_AUTO;
-  return model;
+int32_t llm_model_init(llm_model_t *m) {
+  *m = new llm_model_impl_t();
+  return 0;
 }
 
-llmStatus_t llmModel_Delete(llmModel_t *model) {
-  delete model;
-  return LLM_OK;
+int32_t llm_model_destroy(llm_model_t *m) {
+  if (!m) return llmErrorSetInvalidArg("m");
+
+  delete *m;
+  *m = nullptr;
+  return 0;
 }
 
-llmStatus_t llmModel_SetFile(llmModel_t *model, const char *filename) {
-  return runAndCatch([model, filename]() {
-    if (!model) throw lut::InvalidArgError("model");
-    if (!filename) throw lut::InvalidArgError("filename");
+int32_t llm_model_load(llm_model_t *m, llm_json_t *kwargs) {
+  try {
+    libllm::Device device;
+    std::shared_ptr<lut::ZipFile> package;
+    json object = (*kwargs)->jsonObject;
+    for (auto &[key, value] : object.items()) {
+      if (key == "filename") {
+        package = lut::ZipFile::fromFile(value);
+      } else if (key == "device") {
+        device = parseDevice(value);
+      } else {
+        return llmErrorSetAborted("invalid key in options: " + key);
+      }
+    }
 
-    model->configFile = filename;
-    return LLM_OK;
-  });
+    if (!package) return llmErrorSetAborted("options.filename undefined");
+    if (device.getType() == libllm::Device::kUnknown) {
+      return llmErrorSetAborted("options.device undefined");
+    }
+
+    Context ctx;
+    ctx.setDevice(device);
+    ctx.setFloatDType(F::getDefaultFloatType(device));
+    std::shared_ptr<ModelForGeneration> model = ModelForGeneration::fromPackage(ctx, package.get());
+
+    (*m)->model = model;
+  } catch (std::exception &e) {
+    return llmErrorSetAborted(e.what());
+  }
+
+  return 0;
 }
 
-llmStatus_t llmModel_SetDevice(llmModel_t *model, int32_t device) {
-  return runAndCatch([model, device]() {
-    if (!model) throw lut::InvalidArgError("model");
+int32_t llm_model_get_info(llm_model_t *m, llm_json_t *info) {
+  if (!m) return llmErrorSetInvalidArg("m");
+  if (!info) return llmErrorSetInvalidArg("info");
 
-    model->device = device;
-    return LLM_OK;
-  });
+  try {
+    json infoJson;
+    infoJson["name"] = (*m)->model->getName();
+    (*info)->jsonObject = infoJson;
+  } catch (std::exception &e) {
+    return llmErrorSetAborted(e.what());
+  }
+
+  return 0;
 }
 
-llmStatus_t llmModel_Load(llmModel_t *model) {
-  return runAndCatch([model]() {
-    if (!model) throw lut::InvalidArgError("model");
-    if (model->configFile.empty()) throw lut::InvalidArgError("model file not set.");
-
-    LOG(INFO) << "read model package: " << model->configFile;
-    std::shared_ptr<lut::ZipFile> package = lut::ZipFile::fromFile(model->configFile);
-
-    model->ctx.setDevice(getDeviceFromApi(model->device));
-    model->ctx.setFloatDType(F::getDefaultFloatType(model->ctx.getDevice()));
-    model->tokenizer = Tokenizer::fromPackage(package.get());
-    model->model_for_generation = ModelForGeneration::fromPackage(model->ctx, package.get());
-
-    return LLM_OK;
-  });
+int32_t llm_completion_init(llm_completion_t *c) {
+  *c = new llm_completion_impl_t();
+  return 0;
 }
 
-const char *llmModel_GetName(llmModel_t *model) {
-  return runAndCatch<const char *>(
-      [model]() {
-        if (!model) throw lut::InvalidArgError("m");
-        if (!model->model_for_generation) throw lut::InvalidArgError("model");
+int32_t llm_completion_destroy(llm_completion_t *c) {
+  if (!c) return llmErrorSetInvalidArg("c");
+  delete *c;
+  *c = nullptr;
 
-        return model->model_for_generation->getName();
-      },
-      nullptr);
+  return 0;
 }
 
-llmPrompt_t *llmPrompt_New() {
-  return runAndCatch<llmPrompt_t *>(
-      []() {
-        llmPrompt_t *prompt = new llmPrompt_t();
-        prompt->prompt = std::make_shared<Prompt>();
-        return prompt;
-      },
-      nullptr);
-}
+int32_t llm_model_complete(llm_model_t *m, llm_json_t *kwargs, llm_completion_t *comp) {
+  if (!m) return llmErrorSetInvalidArg("m");
+  if (!kwargs) return llmErrorSetInvalidArg("kwargs");
+  if (!comp) return llmErrorSetInvalidArg("comp");
 
-llmStatus_t llmPrompt_Delete(llmPrompt_t *prompt) {
-  delete prompt;
-  return LLM_OK;
-}
-
-llmStatus_t llmPrompt_AppendText(llmPrompt_t *prompt, const char *text) {
-  return runAndCatch([prompt, text]() {
-    if (!prompt) throw lut::InvalidArgError("prompt");
-    if (!text) throw lut::InvalidArgError("text");
-
-    prompt->prompt->appendText(text);
-    return LLM_OK;
-  });
-}
-
-llmStatus_t llmPrompt_AppendControlToken(llmPrompt_t *prompt, const char *name) {
-  return runAndCatch([prompt, name]() {
-    if (!prompt) throw lut::InvalidArgError("prompt");
-    if (!name) throw lut::InvalidArgError("name");
-
-    prompt->prompt->appendControlToken(name);
-    return LLM_OK;
-  });
-}
-
-llmStatus_t llmPrompt_AppendAudio(
-    llmPrompt_t *prompt,
-    const llmByte_t *audio,
-    int64_t size,
-    int32_t format) {
-  return runAndCatch([prompt, audio, size, format]() {
-    if (!prompt) throw lut::InvalidArgError("prompt");
-    if (!audio) throw lut::InvalidArgError("audio");
-    if (size <= 0 || size > 1024 * 1024 * 1024)
-      throw lut::AbortedError("invalid size, [1, 1G) expected");
-    if (format != LLM_WAVE_FORMAT_PCM16KHZ16BITMONO) throw lut::AbortedError("invalid format");
-
-    prompt->prompt->appendWave(
-        lut::Span<const Byte>(reinterpret_cast<const Byte *>(audio), size),
-        WaveFormat::Wave16kHz16bitMonoPCM);
-    return LLM_OK;
-  });
+  json kwargsCopy = (*kwargs)->jsonObject;
+  GenerationConfig config = parseGenerationConfigAndDeleteKey(kwargsCopy);
+  (*comp)->generator = SamplingGenerator::newGenerator(config, (*m)->model);
+  (*comp)->model_for_generation = (*m)->model;
 }
 
 llmCompletion_t *llmCompletion_New(llmModel_t *model) {
@@ -558,23 +556,11 @@ int32_t llm_asr_model_load(llm_asr_model_t *m, llm_json_t *options) {
   if (!options) return llmErrorSetInvalidArg("options");
 
   try {
-    libllm::Device device;
-    std::shared_ptr<lut::ZipFile> package;
     json object = (*options)->jsonObject;
-    for (auto &[key, value] : object.items()) {
-      if (key == "filename") {
-        package = lut::ZipFile::fromFile(value);
-      } else if (key == "device") {
-        device = parseDevice(value);
-      } else {
-        return llmErrorSetAborted("invalid key in options: " + key);
-      }
-    }
+    checkJsonKeys(object, {{"filename", true}, {"device", true}});
 
-    if (!package) return llmErrorSetAborted("options.filename undefined");
-    if (device.getType() == libllm::Device::kUnknown) {
-      return llmErrorSetAborted("options.device undefined");
-    }
+    std::shared_ptr<lut::ZipFile> package = lut::ZipFile::fromFile(object["filename"]);
+    libllm::Device device = parseDevice(object["device"]);
 
     Context ctx = Context().withName("whisper");
     ctx.setDevice(device);

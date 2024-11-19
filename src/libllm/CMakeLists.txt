@@ -172,6 +172,7 @@ endif()
 
 add_library(libllm_static OBJECT ${libllm_SOURCES})
 target_compile_options(libllm_static PRIVATE "-DLIBLLM_EXPORTS")
+target_compile_features(libllm_static PRIVATE cxx_std_17)
 set_target_properties(libllm_static PROPERTIES CXX_VISIBILITY_PRESET hidden)
 set_target_properties(libllm_static PROPERTIES CUDA_VISIBILITY_PRESET hidden)
 target_include_directories(libllm_static PRIVATE ${libllm_INCDIR})
