@@ -14,6 +14,7 @@ fi
 cd ffmpeg
 echo "configuring ffmpeg ..."
 ./configure \
+    --prefix=$PWD \
     --disable-alsa \
     --disable-x86asm \
     --disable-shared \
@@ -78,3 +79,4 @@ echo "configuring ffmpeg ..."
     --disable-parsers
 
 make -j
+make install

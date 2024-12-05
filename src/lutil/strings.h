@@ -47,6 +47,7 @@ std::string toLower(const std::string &s);
 int parseInt(const std::string &s);
 float parseFloat(const std::string &s);
 bool parseBool(const std::string &s);
+std::string removeInvalidUtf8Bytes(const std::string &s);
 
 // split s string into utf-8 characters (string),
 std::vector<std::string> splitUtf8(const std::string &s);

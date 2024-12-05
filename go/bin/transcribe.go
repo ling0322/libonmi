@@ -133,17 +133,8 @@ func getTranscriotionModel(ba *binArgs) string {
 }
 
 func getTranslationModel(ba *binArgs) string {
-	if ba.getNumModels() == 2 {
-		models := ba.getModels()
-		return models[1]
-	} else if ba.getNumModels() == 1 || ba.getNumModels() == 0 {
-		return "index"
-	} else {
-		slog.Error("invalid number of models (-m)")
-		os.Exit(1)
-	}
-
-	return ""
+	models := ba.getModels()
+	return models[0]
 }
 
 func transcribeMain(args []string) {
@@ -180,7 +171,7 @@ func transcribeMain(args []string) {
 
 	slog.Info(fmt.Sprintf("output file is %s", outputFile))
 
-	recognition, err := model.Recognize(inputFile)
+	recognition, err := model.Recognize(inputFile, "")
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -731,5 +731,9 @@ const Vocab *WhisperModel::getVocab() const {
   return _tokenizer->getVocab();
 }
 
+const Tokenizer *WhisperModel::getTokenizer() const {
+  return _tokenizer.get();
+}
+
 }  // namespace whisper
 }  // namespace libllm

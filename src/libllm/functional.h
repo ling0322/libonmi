@@ -153,6 +153,9 @@ Tensor applyRotaryPosEmb(Tensor A, Tensor roPE);
 // Copy elements from src to dest. Shapes of `src` and `dest` should be the same.
 void copy(Tensor src, Tensor dest);
 
+// Get a copy of src tensor.
+Tensor copy(Tensor src);
+
 // Compute the scaled dot product attention for given QKV and mask.
 // Args:
 //   q <float>(N, nHead, L, D): the query.

@@ -19,11 +19,25 @@
 
 #include "libllm/prompt.h"
 
+#include "lutil/strings.h"
+
 namespace libllm {
 
 PromptBlock::PromptBlock()
     : waveFormat(WaveFormat::Unknown),
       blockType(Type::Unknown) {
+}
+
+std::string PromptBlock::toString() const {
+  if (blockType == ControlToken) {
+    return text;
+  } else if (blockType == Text) {
+    return "\"" + lut::replace(text, "\"", "\\\"") + "\"";
+  } else if (blockType == Wave) {
+    return "[bin::wave]";
+  } else {
+    return "[unknown]";
+  }
 }
 
 std::string PromptBlock::typeToString(Type blockType) {
@@ -59,6 +73,16 @@ void Prompt::appendControlToken(const std::string &controlToken) {
 
 bool Prompt::empty() const {
   return _blocks.empty();
+}
+
+std::string Prompt::toString() const {
+  std::string s;
+  for (const PromptBlock &block : _blocks) {
+    s += block.toString();
+    s += " ";
+  }
+
+  return s;
 }
 
 lut::Span<const PromptBlock> Prompt::getBlocks() const {

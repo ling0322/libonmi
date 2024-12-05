@@ -168,7 +168,7 @@ endif()
 if (WITH_FFMPEG)
     add_library(llmpluginffmpeg_static OBJECT "read_audio_ffmpeg.cc")
     target_compile_options(llmpluginffmpeg_static PRIVATE "-DLIBLLM_EXPORTS")
-    target_include_directories(llmpluginffmpeg_static PRIVATE  ${libllm_INCDIR} "../../third_party/ffmpeg/")
+    target_include_directories(llmpluginffmpeg_static PRIVATE  ${libllm_INCDIR} "../../third_party/ffmpeg/include")
 endif()
 
 add_library(libllm_static OBJECT ${libllm_SOURCES})

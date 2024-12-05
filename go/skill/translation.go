@@ -26,13 +26,17 @@ import (
 	"github.com/ling0322/libllm/go/llm"
 )
 
+type Translation struct {
+	Source string
+	Target string
+}
+
 type TranslationRequest struct {
-	Text              string
-	LeftContextSource string
-	LeftContextTarget string
-	SourceLang        Lang
-	TargetLang        Lang
-	Temperature       float32
+	Text        string
+	History     []Translation
+	SourceLang  Lang
+	TargetLang  Lang
+	Temperature float32
 }
 
 // translator implemented by a chat model
@@ -48,7 +52,7 @@ func NewTranslator(model *llm.Model) (*Translator, error) {
 	return &Translator{model}, nil
 }
 
-var sysPromptIndexTranslation = "Translate from %s to %s. The result should begin with TRANSLATION:"
+var sysPromptIndexTranslation = "Translate from %s to %s, the translation SHOULD be accurate, DO NOT add any addtional data. The result should begin with TRANSLATION:"
 
 var translationExamples = []map[Lang]string{
 	{
@@ -126,16 +130,20 @@ func (l *Translator) Translate(request TranslationRequest) (*llm.Completion, err
 	exampleIdx := rand.Intn(len(translationExamples))
 	leftCtxSrc := translationExamples[exampleIdx][request.SourceLang]
 	leftCtxTgt := translationExamples[exampleIdx][request.TargetLang]
-	if request.LeftContextSource != "" {
-		leftCtxSrc = request.LeftContextSource
-		leftCtxTgt = request.LeftContextTarget
-	}
 
 	messages := []llm.Message{
 		{Role: "system", Content: sysPrompt},
-		{Role: "user", Content: leftCtxSrc + request.Text},
+		{Role: "user", Content: leftCtxSrc},
 		{Role: "assistant", Content: "TRANSLATION: " + leftCtxTgt},
 	}
+
+	for _, translation := range request.History {
+		messages = append(messages, llm.Message{Role: "user", Content: translation.Source})
+		messages = append(messages, llm.Message{Role: "assistant", Content: "TRANSLATION: " + translation.Target})
+	}
+
+	messages = append(messages, llm.Message{Role: "user", Content: request.Text + "。"})
+	messages = append(messages, llm.Message{Role: "assistant", Content: "TRANSLATION: "})
 
 	return l.model.Complete(messages, llm.DefaultCompletionConfig())
 }

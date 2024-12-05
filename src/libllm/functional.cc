@@ -152,6 +152,12 @@ void copy(Tensor src, Tensor dest) {
   }
 }
 
+Tensor copy(Tensor src) {
+  Tensor x = tensorLike(src);
+  copy(src, x);
+  return x;
+}
+
 void repetitionPenalty(Tensor logits, Tensor history, float weight) {
   getOperators(logits.getDevice().getType())->repetitionPenalty(logits, history, weight);
 }

@@ -23,6 +23,7 @@
 
 #include "libllm/functional.h"
 #include "lutil/error.h"
+#include "lutil/strings.h"
 
 namespace libllm {
 namespace whisper {
@@ -37,6 +38,7 @@ WhisperChunkGreedySearchDecoder::WhisperChunkGreedySearchDecoder()
       _targetLangToken(-1),
       _langTokenEn(-1),
       _langTokenSu(-1),
+      _prevToken(-1),
       _lastTimeToken(-1),
       _timestamp0000(-1),
       _timestamp3000(-1),
@@ -58,6 +60,7 @@ std::shared_ptr<WhisperChunkGreedySearchDecoder> WhisperChunkGreedySearchDecoder
   decoder->_noSpeechToken = vocab->findControlToken("<|nospeech|>");
   decoder->_langTokenEn = vocab->findControlToken("<|en|>");
   decoder->_langTokenSu = vocab->findControlToken("<|su|>");
+  decoder->_prevToken = vocab->findControlToken("<|startofprev|>");
   decoder->_timestamp0000 = vocab->findControlToken("<|0.00|>");
   decoder->_timestamp3000 = vocab->findControlToken("<|30.00|>");
   decoder->_eotToken = vocab->findControlToken("<|endoftext|>");
@@ -66,7 +69,32 @@ std::shared_ptr<WhisperChunkGreedySearchDecoder> WhisperChunkGreedySearchDecoder
   decoder->_noTimestampToken = vocab->findControlToken("<|notimestamps|>");
   decoder->_startOfTranscriptToken = vocab->findControlToken("<|startoftranscript|>");
 
+  decoder->initLogitsMasks();
   return decoder;
+}
+
+void WhisperChunkGreedySearchDecoder::initLogitsMasks() {
+  Tensor x = F::zeros(
+      {_model->getOutputDim()},
+      F::getDefaultFloatType(_model->getDevice()),
+      _model->getDevice());
+  constexpr float Inf = std::numeric_limits<float>::infinity();
+  F::fill(x, -Inf);
+  F::fill(x.slice({_timestamp0000, _timestamp3000 + 1}), 0.0f);
+  _maskTimestamp = F::copy(x);
+
+  F::fill(x, -Inf);
+  F::fill(x.slice({0, _eotToken + 1}), 0.0f);
+  F::fill(x.slice({_timestamp0000, _timestamp3000 + 1}), 0.0f);
+  _maskTextOrTimestamp = F::copy(x);
+
+  F::fill(x, -Inf);
+  F::fill(x.slice({_langTokenEn, _langTokenSu + 1}), 0.0f);
+  _maskLang = F::copy(x);
+
+  F::fill(x, -Inf);
+  F::fill(x.slice({0, _eotToken + 1}), 0.0f);
+  _maskText = F::copy(x);
 }
 
 Tensor WhisperChunkGreedySearchDecoder::applySoftmax(Tensor logits) {
@@ -77,8 +105,7 @@ Tensor WhisperChunkGreedySearchDecoder::applySoftmax(Tensor logits) {
     x = F::mul(x, 1.0f / _temperature);
   }
 
-  processLogits(x);
-
+  x = processLogits(x);
   x = F::softmax(x);
   if (x.getDType() == DType::kFloat16) {
     x = F::cast(x, DType::kFloat);
@@ -90,8 +117,24 @@ Tensor WhisperChunkGreedySearchDecoder::applySoftmax(Tensor logits) {
   return x;
 }
 
-void WhisperChunkGreedySearchDecoder::inferLang() {
-  std::vector<LongType> tokenIds{_startOfTranscriptToken};
+void WhisperChunkGreedySearchDecoder::feedPromptAndInferLang(const std::string &prompt) {
+  std::vector<LongType> tokenIds;
+  if (!prompt.empty()) {
+    const Tokenizer *tokenizer = _model->getTokenizer();
+    std::vector<int> tokens = tokenizer->encode(prompt);
+    if (tokens.size() > 224) {
+      int n = tokens.size() - 224;
+      tokens.erase(tokens.begin(), tokens.begin() + n);
+    }
+    tokenIds.push_back(_prevToken);
+    for (int token : tokens) {
+      tokenIds.push_back(static_cast<LongType>(token));
+    }
+    LOG(INFO) << "!prompt.empty(): " << tokenIds.size();
+  }
+
+  tokenIds.push_back(_startOfTranscriptToken);
+  updateHistory(_startOfTranscriptToken);
   Tensor inputs = Tensor::create<LongType>({1, static_cast<int>(tokenIds.size())}, tokenIds);
   inputs = F::to(_model->getDevice(), inputs);
 
@@ -121,9 +164,10 @@ void WhisperChunkGreedySearchDecoder::setTranscribeMode() {
   updateHistory(_transcribeToken);
 }
 
-void WhisperChunkGreedySearchDecoder::processLogits(Tensor logits) {
+Tensor WhisperChunkGreedySearchDecoder::processLogits(Tensor logits) {
   bool lastWasTimestamp = _history.size() >= 1 && _history.back() >= _timestamp0000;
   bool lastWasTranscribe = _history.size() >= 1 && _history.back() == _transcribeToken;
+  bool lastWasSot = _history.size() >= 1 && _history.back() == _startOfTranscriptToken;
   bool penultimateWasTimestamp = _history.size() < 2 ||
                                  _history[_history.size() - 2] >= _timestamp0000 ||
                                  _history[_history.size() - 2] == _transcribeToken ||
@@ -139,17 +183,19 @@ void WhisperChunkGreedySearchDecoder::processLogits(Tensor logits) {
   }
 
   constexpr float Inf = std::numeric_limits<float>::infinity();
-  if (lastWasTranscribe) {
-    F::fill(logits.slice(-1, {_noTimestampToken, _noTimestampToken + 1}), -Inf);
-  }
-
-  if (lastWasTimestamp) {
+  if (lastWasSot) {
+    logits = F::add(logits, _maskLang);
+  } else if (lastWasTranscribe) {
+    logits = F::add(logits, _maskTimestamp);
+  } else if (lastWasTimestamp) {
     _lastTimeTokenIdx = static_cast<int>(_history.size());
     if (penultimateWasTimestamp) {
-      F::fill(logits.slice(-1, {_timestamp0000, _timestamp3000 + 1}), -Inf);
+      logits = F::add(logits, _maskText);
     } else {
-      F::fill(logits.slice(-1, {0, _eotToken + 1}), -Inf);
+      logits = F::add(logits, _maskTimestamp);
     }
+  } else {
+    logits = F::add(logits, _maskTextOrTimestamp);
   }
 
   if (_lastTimeToken > _timestamp0000) {
@@ -170,6 +216,8 @@ void WhisperChunkGreedySearchDecoder::processLogits(Tensor logits) {
   if (sumTimestampVal >= maxTextVal || _history.size() - _lastTimeTokenIdx > 70) {
     F::fill(logits.slice(-1, {0, _eotToken}), -Inf);
   }
+
+  return logits;
 }
 
 int WhisperChunkGreedySearchDecoder::decodeToken() {
@@ -184,11 +232,16 @@ int WhisperChunkGreedySearchDecoder::decodeToken() {
 
   const float *pMaxProb = std::max_element(pProb, pProb + probCpu.getShape(0));
   int nextToken = static_cast<int>(pMaxProb - pProb);
+
+  // a trick
   if (isTimestampToken(nextToken) && nextToken != _timestamp0000) {
     --nextToken;
   }
 
   updateHistory(nextToken);
+  LOG(DEBUG) << "p=" << *pMaxProb << ": \"" << nextToken << "\" -> "
+             << _model->getVocab()->getTokenPiece(nextToken) << " : "
+             << _model->getVocab()->getTokenString(nextToken);
   return nextToken;
 }
 
@@ -216,7 +269,9 @@ std::string WhisperChunkGreedySearchDecoder::parseLangToken(int tokenId) const {
   return token.substr(2, token.size() - 4);
 }
 
-std::vector<RecognitionResult> WhisperChunkGreedySearchDecoder::decode(Tensor wave) {
+std::vector<RecognitionResult> WhisperChunkGreedySearchDecoder::decode(
+    const std::string &prompt,
+    Tensor wave) {
   // reset states.
   _kvCache = StateMap();
   _history.clear();
@@ -229,7 +284,7 @@ std::vector<RecognitionResult> WhisperChunkGreedySearchDecoder::decode(Tensor wa
   _audioLength = lut::Duration::nanoseconds(wave.getShape(0) * 1000000000LL / 16000);
 
   // prepare prompt.
-  inferLang();
+  feedPromptAndInferLang(prompt);
   setTranscribeMode();
 
   // generate tokens.
@@ -260,7 +315,7 @@ std::vector<RecognitionResult> WhisperChunkGreedySearchDecoder::decode(Tensor wa
     RecognitionResult result;
     result.begin = begin;
     result.end = std::min(end, _audioLength);
-    result.text = text;
+    result.text = lut::removeInvalidUtf8Bytes(text);
     result.language = parseLangToken(_targetLangToken);
     results.emplace_back(result);
     LOG(DEBUG) << result.begin.toString() << " - " << result.end.toString() << " : " << result.text;
@@ -302,12 +357,14 @@ WhisperDecoder::WhisperDecoder()
 
 std::shared_ptr<WhisperDecoder> WhisperDecoder::create(
     std::shared_ptr<WhisperModel> model,
+    const std::string &prompt,
     std::shared_ptr<Wave> wave) {
   std::shared_ptr<WhisperDecoder> decoder{new WhisperDecoder()};
 
   // get timestamp token
   decoder->_chunkDecoder = WhisperChunkGreedySearchDecoder::fromModel(model);
   decoder->_wave = wave;
+  decoder->_prompt = prompt;
 
   return decoder;
 }
@@ -322,7 +379,7 @@ std::optional<RecognitionResult> WhisperDecoder::nextResult() {
       break;
     }
 
-    std::vector<RecognitionResult> results = _chunkDecoder->decode(waveChunk);
+    std::vector<RecognitionResult> results = _chunkDecoder->decode(_prompt, waveChunk);
     for (RecognitionResult &result : results) {
       result.begin += offset;
       result.end += offset;

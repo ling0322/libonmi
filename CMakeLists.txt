@@ -140,15 +140,10 @@ endif()
 
 if (WITH_FFMPEG)
     add_library(llmpluginffmpeg SHARED $<TARGET_OBJECTS:llmpluginffmpeg_static>)
-    target_include_directories(llmpluginffmpeg PRIVATE ${libllm_INCDIR})
-
     set(ffmpeg_ROOT "third_party/ffmpeg")
-    target_link_directories(llmpluginffmpeg PUBLIC
-        "${ffmpeg_ROOT}/libavformat"
-        "${ffmpeg_ROOT}/libavcodec"
-        "${ffmpeg_ROOT}/libavfilter"
-        "${ffmpeg_ROOT}/libavutil"
-        "${ffmpeg_ROOT}/libswresample")
+    target_link_directories(llmpluginffmpeg PUBLIC "${ffmpeg_ROOT}/lib")
+    target_include_directories(llmpluginffmpeg PRIVATE "${ffmpeg_ROOT}/include")
+
     target_link_libraries(
         llmpluginffmpeg avformat avcodec avfilter avutil swresample ${CMAKE_THREAD_LIBS_INIT}) 
     if(UNIX AND NOT APPLE)

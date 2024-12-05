@@ -423,20 +423,15 @@ int32_t llm_asr_recognize_media_file(
   if (!options) return llmErrorSetInvalidArg("options");
 
   try {
-    std::string mediaFile;
     json object = (*options)->jsonObject;
-    for (auto &[key, value] : object.items()) {
-      if (key == "media_file") {
-        mediaFile = value;
-      } else {
-        throw lut::AbortedError("invalid key in options: " + key);
-      }
-    }
+    checkJsonKeys(object, {{"media_file", true}, {"prompt", false}});
+    std::string mediaFile = object["media_file"];
+    std::string prompt = getValueFromJson<std::string>(object, "prompt", "");
 
     std::shared_ptr<WaveStream> stream = FFmpegWaveStream::open(mediaFile);
     std::shared_ptr<WhisperModel> whisperModel = (*model)->model;
     std::shared_ptr<Wave> wave = std::make_shared<Wave>(stream);
-    std::shared_ptr<WhisperDecoder> decoder = WhisperDecoder::create(whisperModel, wave);
+    std::shared_ptr<WhisperDecoder> decoder = WhisperDecoder::create(whisperModel, prompt, wave);
 
     (*recognition)->decoder = decoder;
   } catch (std::exception &e) {

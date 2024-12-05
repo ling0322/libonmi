@@ -92,12 +92,13 @@ func NewASRModel(filename, device string) (*ASRModel, error) {
 	return m, nil
 }
 
-func (m *ASRModel) Recognize(filename string) (*Recognition, error) {
+func (m *ASRModel) Recognize(filename, prompt string) (*Recognition, error) {
 	r := newRecognition()
 
 	json := newJson()
 	json.marshal(map[string]any{
 		"media_file": filename,
+		"prompt": prompt,
 	})
 
 	status := C.llm_asr_recognize_media_file(&m.model, &json.json, &r.recognition)

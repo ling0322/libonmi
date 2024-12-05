@@ -238,6 +238,7 @@ class WhisperModel {
   Device getDevice() const;
   int getOutputDim() const;
   const Vocab *getVocab() const;
+  const Tokenizer *getTokenizer() const;
 
  protected:
   std::shared_ptr<EncoderModel> _encoder;

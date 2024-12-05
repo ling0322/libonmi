@@ -49,7 +49,7 @@ class WhisperChunkGreedySearchDecoder {
 
   /// @brief decode one token.
   /// @return the whole decode result.
-  std::vector<RecognitionResult> decode(Tensor wave);
+  std::vector<RecognitionResult> decode(const std::string &prompt, Tensor wave);
 
  private:
   StateMap _kvCache;
@@ -60,6 +60,7 @@ class WhisperChunkGreedySearchDecoder {
   int _langTokenEn;
   int _langTokenSu;
 
+  int _prevToken;
   int _lastTimeToken;
   int _timestamp0000;
   int _timestamp3000;
@@ -71,19 +72,26 @@ class WhisperChunkGreedySearchDecoder {
 
   int _lastTimeTokenIdx;
   float _noSpeechProb;
+
+  Tensor _maskLang;
+  Tensor _maskTimestamp;
+  Tensor _maskText;
+  Tensor _maskTextOrTimestamp;
+
   lut::Duration _audioLength;
 
   std::vector<LongType> _history;
   std::shared_ptr<WhisperModel> _model;
 
-  void processLogits(Tensor logits);
+  void initLogitsMasks();
+  Tensor processLogits(Tensor logits);
   std::string parseLangToken(int tokenId) const;
   lut::Duration parseTimestampToken(int tokenId) const;
   bool isTimestampToken(int tokenId) const;
   void updateHistory(int tokenId);
 
   Tensor applySoftmax(Tensor logits);
-  void inferLang();
+  void feedPromptAndInferLang(const std::string &prompt);
   void setTranscribeMode();
 
   /// @brief decode one token from input audio.
@@ -97,6 +105,7 @@ class WhisperDecoder {
  public:
   static std::shared_ptr<WhisperDecoder> create(
       std::shared_ptr<WhisperModel> model,
+      const std::string &prompt,
       std::shared_ptr<Wave> wave);
 
   /// @brief get next result from decoder.
@@ -107,6 +116,7 @@ class WhisperDecoder {
   std::shared_ptr<WhisperChunkGreedySearchDecoder> _chunkDecoder;
   std::shared_ptr<Wave> _wave;
   std::deque<RecognitionResult> _results;
+  std::string _prompt;
   lut::Duration _waveOffset;
   bool _waveEof;
 

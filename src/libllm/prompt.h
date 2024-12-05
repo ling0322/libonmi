@@ -43,6 +43,7 @@ struct PromptBlock {
   Type blockType;
 
   PromptBlock();
+  std::string toString() const;
   static std::string typeToString(Type blockType);
 };
 
@@ -57,6 +58,7 @@ class Prompt {
   void appendControlToken(const std::string &controlToken);
 
   bool empty() const;
+  std::string toString() const;
 
   lut::Span<const PromptBlock> getBlocks() const;
 

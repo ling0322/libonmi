@@ -31,8 +31,7 @@ import (
 )
 
 type transcriptionTranslator struct {
-	historySrc []string
-	historyTgt []string
+	history    []skill.Translation
 	translator *skill.Translator
 	srcLang    skill.Lang
 	tgtLang    skill.Lang
@@ -42,12 +41,11 @@ func (t *transcriptionTranslator) translateOneInternal(
 	text string, temperature float32) (translationResult, error) {
 
 	req := skill.TranslationRequest{
-		Text:              text,
-		LeftContextSource: strings.Join(t.historySrc, " "),
-		LeftContextTarget: strings.Join(t.historyTgt, " "),
-		SourceLang:        t.srcLang,
-		TargetLang:        t.tgtLang,
-		Temperature:       temperature,
+		Text:        text,
+		History:     t.history,
+		SourceLang:  t.srcLang,
+		TargetLang:  t.tgtLang,
+		Temperature: temperature,
 	}
 	tr, err := translate(t.translator, req, nil)
 	if err != nil {
@@ -73,8 +71,7 @@ func (t *transcriptionTranslator) translateOneWithRetry(text string) (translatio
 		}
 
 		// clear history if no result.
-		t.historySrc = []string{}
-		t.historyTgt = []string{}
+		t.history = []skill.Translation{}
 	}
 
 	return tr, nil
@@ -87,17 +84,13 @@ func (t *transcriptionTranslator) translateOne(text string) (translationResult, 
 	}
 
 	if tr.tgtText == "" {
-		t.historySrc = []string{}
-		t.historyTgt = []string{}
-		tr.tgtText = tr.srcText
+		t.history = []skill.Translation{}
 		return tr, nil
 	}
 
-	t.historySrc = append(t.historySrc, text)
-	t.historyTgt = append(t.historyTgt, tr.tgtText)
-	if len(t.historySrc) > 3 {
-		t.historySrc = t.historySrc[1:]
-		t.historyTgt = t.historyTgt[1:]
+	t.history = append(t.history, skill.Translation{text, tr.tgtText})
+	if len(t.history) > 3 {
+		t.history = t.history[1:]
 	}
 
 	return tr, nil

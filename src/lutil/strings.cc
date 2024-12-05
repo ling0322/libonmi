@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <string>
 #include <vector>
 
 #include "../../third_party/utfcpp/utfcpp.h"
@@ -225,6 +226,80 @@ std::vector<std::string> splitUtf8(const std::string &s) {
   }
 
   return utf8Chars;
+}
+
+std::string removeInvalidUtf8Bytes(const std::string &s) {
+  std::string result;
+  size_t i = 0;
+  size_t len = s.size();
+
+  while (i < len) {
+    unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c <= 0x7F) {
+      // ASCII character (1-byte sequence)
+      result += c;
+      i++;
+    } else if (c >= 0xC2 && c <= 0xDF) {
+      // 2-byte sequence
+      if (i + 1 < len) {
+        unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
+        if (c1 >= 0x80 && c1 <= 0xBF) {
+          result += c;
+          result += c1;
+          i += 2;
+        } else {
+          // Invalid continuation byte
+          i++;
+        }
+      } else {
+        // Incomplete sequence
+        i++;
+      }
+    } else if ((c >= 0xE0 && c <= 0xEF)) {
+      // 3-byte sequence
+      if (i + 2 < len) {
+        unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
+        unsigned char c2 = static_cast<unsigned char>(s[i + 2]);
+        if ((c != 0xE0 || (c1 >= 0xA0 && c1 <= 0xBF)) &&  // Avoid overlong encoding
+            (c != 0xED || (c1 >= 0x80 && c1 <= 0x9F)) &&  // Avoid surrogates
+            c1 >= 0x80 && c1 <= 0xBF && c2 >= 0x80 && c2 <= 0xBF) {
+          result += c;
+          result += c1;
+          result += c2;
+          i += 3;
+        } else {
+          i++;
+        }
+      } else {
+        i++;
+      }
+    } else if ((c >= 0xF0 && c <= 0xF4)) {
+      // 4-byte sequence
+      if (i + 3 < len) {
+        unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
+        unsigned char c2 = static_cast<unsigned char>(s[i + 2]);
+        unsigned char c3 = static_cast<unsigned char>(s[i + 3]);
+        if ((c != 0xF0 || (c1 >= 0x90 && c1 <= 0xBF)) &&  // Avoid overlong encoding
+            (c != 0xF4 || (c1 >= 0x80 && c1 <= 0x8F)) &&  // Stay within U+10FFFF
+            c1 >= 0x80 && c1 <= 0xBF && c2 >= 0x80 && c2 <= 0xBF && c3 >= 0x80 && c3 <= 0xBF) {
+          result += c;
+          result += c1;
+          result += c2;
+          result += c3;
+          i += 4;
+        } else {
+          i++;
+        }
+      } else {
+        i++;
+      }
+    } else {
+      // Invalid starting byte
+      i++;
+    }
+  }
+
+  return result;
 }
 
 }  // namespace lut
