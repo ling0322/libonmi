@@ -15,6 +15,17 @@ impl Builder {
             None => Err(Error::TensorNotExistError),
         }
     }
+
+    pub fn push_prefix(&self, prefix: &str) -> Self {
+        Self {
+            tensor_map: self.tensor_map.clone(),
+            name: self.name.to_string() + "." + prefix,
+        }
+    }
+
+    pub fn pp(&self, prefix: &str) -> Self {
+        self.push_prefix(prefix)
+    }
 }
 
 pub struct LayerNorm {

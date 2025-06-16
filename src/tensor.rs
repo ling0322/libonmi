@@ -1,4 +1,4 @@
-use crate::{lten, operator::F, Error, Result};
+use crate::{lten, Error, Result, F};
 use std::any::TypeId;
 use std::fmt;
 use std::io::BufReader;
